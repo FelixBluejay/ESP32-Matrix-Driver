@@ -1,34 +1,67 @@
 #include <FastLED.h>
 #include <BluetoothSerial.h>
 
-#define DATA_PIN 4 
+#define DATA_PIN 4
 #define NUM_LEDS 256
 CRGB leds[NUM_LEDS];
 
 BluetoothSerial SerialBT;
 String deviceName = "ESP32 Matrix Controller";
 
+volatile bool newDataAvailable = false;
+String receivedData = "";
+
+// Task handles
+TaskHandle_t bluetoothTaskHandle = NULL;
+
 void setup() {
-  FastLED.addLeds<WS2812B, DATA_PIN, GRB>(leds, NUM_LEDS);
-  FastLED.setBrightness(10);  // Lower = less noise
-  
   Serial.begin(115200);
   SerialBT.begin(deviceName);
+
+  FastLED.addLeds<WS2812B, DATA_PIN, GRB>(leds, NUM_LEDS);
+  FastLED.setBrightness(10);
+
+  xTaskCreatePinnedToCore(
+    bluetoothTask,         // Task function
+    "BT_Task",             // Name
+    8192,                  // Larger stack for BT
+    NULL,                  // Parameters
+    2,                     // Higher priority
+    &bluetoothTaskHandle,  // Task handle
+    1                      // Core 1
+  );
 }
 
 void loop() {
-  if (Serial.available()) {
-    SerialBT.write(Serial.read());
-  }
-  if (SerialBT.available()) {
-    Serial.write(SerialBT.read());
-  }
 
-  fill_solid(leds, NUM_LEDS, CRGB::Blue);
+  fill_solid(leds, NUM_LEDS, CRGB::Red);
   FastLED.show();
   delay(500);
-  
   fill_solid(leds, NUM_LEDS, CRGB::Green);
   FastLED.show();
   delay(500);
+
+  if (newDataAvailable) {
+    Serial.print("Received: ");
+    Serial.println(receivedData);
+    newDataAvailable = false;
+  }
+}
+
+void bluetoothTask(void *pvParameters) {
+  while (1) {
+    // Forward data between Serial and Bluetooth
+    if (Serial.available()) {
+      SerialBT.write(Serial.read());
+    }
+
+    if (SerialBT.available()) {
+      receivedData = SerialBT.readStringUntil('\n');
+      newDataAvailable = true;
+      // Serial.write(SerialBT.read());
+      // Serial.write(receivedData);
+    }
+
+    delay(20);  // Small delay to prevent task starvation
+  }
 }

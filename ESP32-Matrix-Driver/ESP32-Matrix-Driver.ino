@@ -1,5 +1,6 @@
 #include <FastLED.h>
 #include <BluetoothSerial.h>
+#include <ArduinoJson.h>
 
 #define DATA_PIN 4
 #define NUM_LEDS 256
@@ -13,6 +14,8 @@ String receivedData = "";
 
 // Task handles
 TaskHandle_t bluetoothTaskHandle = NULL;
+
+JsonDocument doc;
 
 void setup() {
   Serial.begin(115200);
@@ -32,14 +35,28 @@ void setup() {
   );
 }
 
+int getFlippedIndex(int x, int y) {
+  if (y % 2 == 0) {
+    return y * 16 + x;  // Even rows: left-to-right
+  } else {
+    return (y + 1) * 16 - 1 - x;  // Odd rows: right-to-left
+  }
+}
+
 void loop() {
 
-  fill_solid(leds, NUM_LEDS, CRGB::Red);
+  for (int y = 0; y < 16; y++) {
+    for (int x = 0; x < 16; x++) {
+      leds[getFlippedIndex(x, y)] = CRGB(x * 16, y * 16, 0);
+    }
+  }
+
+  // fill_solid(leds, NUM_LEDS, CRGB::Red);
   FastLED.show();
   delay(500);
-  fill_solid(leds, NUM_LEDS, CRGB::Green);
-  FastLED.show();
-  delay(500);
+  // fill_solid(leds, NUM_LEDS, CRGB::Green);
+  // FastLED.show();
+  // delay(500);
 
   if (newDataAvailable) {
     Serial.print("Received: ");
@@ -48,7 +65,7 @@ void loop() {
   }
 }
 
-void bluetoothTask(void *pvParameters) {
+void bluetoothTask(void* pvParameters) {
   while (1) {
     // Forward data between Serial and Bluetooth
     if (Serial.available()) {
@@ -58,6 +75,17 @@ void bluetoothTask(void *pvParameters) {
     if (SerialBT.available()) {
       receivedData = SerialBT.readStringUntil('\n');
       newDataAvailable = true;
+
+      DeserializationError error = deserializeJson(doc, receivedData);
+
+      if (error) {
+        Serial.print("deserializeJson() returned ");
+        Serial.println(error.c_str());
+        return;
+      } else {
+        //const char* sensor = doc["sensor"];
+        //Serial.println(sensor);
+      }
       // Serial.write(SerialBT.read());
       // Serial.write(receivedData);
     }

@@ -9,13 +9,13 @@ CRGB leds[NUM_LEDS];
 BluetoothSerial SerialBT;
 String deviceName = "ESP32 Matrix Controller";
 
-volatile bool newDataAvailable = false;
+volatile bool newFrameAvailable = false;
 String receivedData = "";
 
 // Task handles
 TaskHandle_t bluetoothTaskHandle = NULL;
 
-JsonDocument doc;
+DynamicJsonDocument doc(16384);  // Increased size for large frame data
 
 void setup() {
   Serial.begin(115200);
@@ -43,51 +43,58 @@ int getFlippedIndex(int x, int y) {
   }
 }
 
-void loop() {
-
+void displayFrame(JsonArray frameData) {
   for (int y = 0; y < 16; y++) {
+    JsonArray row = frameData[y];
+    Serial.println("Frame data: ");
     for (int x = 0; x < 16; x++) {
-      leds[getFlippedIndex(x, y)] = CRGB(x * 16, y * 16, 0);
+      JsonArray pixel = row[x];
+      uint8_t r = pixel[1];
+      uint8_t g = pixel[0];
+      uint8_t b = pixel[2];
+      Serial.print("[");
+      Serial.print(r);
+      Serial.print(", ");
+      Serial.print(g);
+      Serial.print(", ");
+      Serial.print(b);
+      Serial.print("], ");
+      leds[getFlippedIndex(x, y)] = CRGB(r, g, b);
     }
   }
-
-  // fill_solid(leds, NUM_LEDS, CRGB::Red);
   FastLED.show();
-  delay(500);
-  // fill_solid(leds, NUM_LEDS, CRGB::Green);
-  // FastLED.show();
-  // delay(500);
+}
 
-  if (newDataAvailable) {
-    Serial.print("Received: ");
+void loop() {
+  if (newFrameAvailable) {
+    DeserializationError error = deserializeJson(doc, receivedData);
     Serial.println(receivedData);
-    newDataAvailable = false;
+    if (!error) {
+      if (doc.containsKey("cmd") && strcmp(doc["cmd"], "displayFrame") == 0) {
+        JsonArray frameData = doc["frameData"];
+        displayFrame(frameData);
+        Serial.println("Frame displayed successfully");
+      }
+    } else {
+      Serial.print("deserializeJson() failed: ");
+      Serial.println(error.c_str());
+    }
+    newFrameAvailable = false;
   }
+
+  // Small delay to prevent watchdog reset
+  delay(10);
 }
 
 void bluetoothTask(void* pvParameters) {
   while (1) {
-    // Forward data between Serial and Bluetooth
     if (Serial.available()) {
       SerialBT.write(Serial.read());
     }
 
     if (SerialBT.available()) {
       receivedData = SerialBT.readStringUntil('\n');
-      newDataAvailable = true;
-
-      DeserializationError error = deserializeJson(doc, receivedData);
-
-      if (error) {
-        Serial.print("deserializeJson() returned ");
-        Serial.println(error.c_str());
-        return;
-      } else {
-        //const char* sensor = doc["sensor"];
-        //Serial.println(sensor);
-      }
-      // Serial.write(SerialBT.read());
-      // Serial.write(receivedData);
+      newFrameAvailable = true;
     }
 
     delay(20);  // Small delay to prevent task starvation
